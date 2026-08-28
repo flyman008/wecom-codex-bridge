@@ -8,6 +8,18 @@
 
 Codex 会按操作系统选择脚本，并只在登录、扫码和填写本地密钥时请求人工处理。
 
+## 快速开始
+
+```bash
+git clone https://github.com/flyman008/wecom-codex-bridge.git
+cd wecom-codex-bridge
+npm ci
+npm run check
+npm run setup
+```
+
+也可以克隆后直接让 Codex 按照仓库根目录的 `AGENTS.md` 完成部署和验收。
+
 ## 当前能力
 
 - 企业微信 WebSocket 长连接、自动认证、心跳和断线重连。

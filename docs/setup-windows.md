@@ -13,7 +13,7 @@ codex login status
 ## 2. 安装工程
 
 ```powershell
-git clone <repository-url>
+git clone https://github.com/flyman008/wecom-codex-bridge.git
 Set-Location .\wecom-codex-bridge
 npm ci
 npm run check

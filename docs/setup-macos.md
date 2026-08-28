@@ -17,7 +17,7 @@ codex login status
 ## 2. 安装工程
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/flyman008/wecom-codex-bridge.git
 cd wecom-codex-bridge
 npm ci
 npm run check
