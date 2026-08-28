@@ -15,11 +15,6 @@ const baseSettings = {
   botId: 'example-bot',
   botSecret: 'example-secret',
   autostart: false,
-  routingMode: 'codex_all',
-  defaultAgent: 'llm',
-  llmBaseUrl: '',
-  llmApiKey: '',
-  llmModel: '',
   codexModel: '',
   codexFallbackModel: '',
   codexReasoningEffort: '',
@@ -28,18 +23,16 @@ const baseSettings = {
   codexAdditionalDirs: '',
   codexSandbox: 'workspace-write',
   codexEphemeral: false,
-  localAgentUrl: '',
-  localAgentToken: '',
 };
 
-test('安装配置保留安装人的选择，不写死 Codex 模型链', () => {
+test('安装配置保留使用者的 Codex 与服务选择', () => {
   const content = buildEnv(baseSettings);
   const parsed = parseEnvFile(content);
-  assert.equal(parsed.ROUTING_MODE, 'codex_all');
   assert.equal(parsed.SERVICE_AUTOSTART, 'false');
   assert.equal(parsed.CODEX_MODEL, '');
   assert.equal(parsed.CODEX_FALLBACK_MODEL, '');
   assert.equal(parsed.CODEX_WORKDIR, 'C:\\work folder');
+  assert.equal(parsed.PERSONA_PROFILE_PATH, '.runtime/persona-profile.json');
 });
 
 test('生成的配置可以由 Node 原生环境文件加载器读取', async () => {
@@ -60,10 +53,10 @@ test('环境变量值会安全编码并可重新读取', () => {
   assert.equal(parseEnvFile(`VALUE=${encodeEnvValue(value)}`).VALUE, value);
 });
 
-test('安装人可以关闭偏题提醒', () => {
+test('使用者可以关闭偏题提醒', () => {
   const profile = buildProfile({
     name: '自定义助手',
-    personaPrompt: '只按安装人的规则回复。',
+    personaPrompt: '只按使用者的规则回复。',
     offTopicReminderEnabled: false,
     offTopicReminder: '不应出现',
     offTopicReminderThreshold: 3,

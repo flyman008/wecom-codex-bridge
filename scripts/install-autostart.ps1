@@ -30,7 +30,7 @@ try {
     -Trigger $trigger `
     -Settings $settings `
     -Principal $principal `
-    -Description '当前用户登录后启动企业微信智能机器人 Agent 路由服务' `
+    -Description '当前用户登录后启动企业微信 Codex 桥接服务' `
     -Force `
     -ErrorAction Stop | Out-Null
 
@@ -50,7 +50,7 @@ try {
   $shortcut.Arguments = $arguments
   $shortcut.WorkingDirectory = $projectRoot
   $shortcut.WindowStyle = 7
-  $shortcut.Description = '启动企业微信智能机器人 Agent 路由服务'
+  $shortcut.Description = '启动企业微信 Codex 桥接服务'
   $shortcut.Save()
   Write-Output "Startup shortcut installed: $shortcutPath"
 }

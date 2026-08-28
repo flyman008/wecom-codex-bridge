@@ -26,7 +26,7 @@ npx wecom-cli auth init
 npx wecom-cli auth show --status
 ```
 
-## 4. 由安装人配置
+## 4. 由使用者配置
 
 在交互式 PowerShell 或 Codex 可见终端中运行：
 
@@ -34,7 +34,7 @@ npx wecom-cli auth show --status
 npm run setup
 ```
 
-安装人需要选择人设、消息路由、Codex 模型策略、目录权限、会话方式和是否自启动。密钥输入不会回显，结果只保存到被 Git 忽略的本机配置中。
+使用者需要选择人设、Codex 模型策略、目录权限、会话方式和是否自启动。Bot Secret 输入不会回显，结果只保存到被 Git 忽略的本机配置中；Codex 是唯一的模型依赖，无需配置第二套模型服务。
 
 ## 5. 启动和验收
 
@@ -53,4 +53,4 @@ npm run doctor
 npm run autostart:apply
 ```
 
-命令根据 `.env` 中由安装人设置的 `SERVICE_AUTOSTART=true/false` 安装或移除自启动项。安装时优先使用当前用户计划任务，权限策略不允许时回退到启动目录快捷方式。
+命令根据 `.env` 中由使用者设置的 `SERVICE_AUTOSTART=true/false` 安装或移除自启动项。安装时优先使用当前用户计划任务，权限策略不允许时回退到启动目录快捷方式。

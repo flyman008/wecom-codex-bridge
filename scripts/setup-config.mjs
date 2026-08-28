@@ -50,26 +50,15 @@ export function buildEnv(settings) {
     'WECOM_HEARTBEAT_MS=30000',
     'WECOM_MAX_RECONNECT_ATTEMPTS=-1',
     '',
-    '# 安装人与路由策略',
+    '# 使用者的安装策略',
     line('SERVICE_AUTOSTART', settings.autostart),
-    line('ROUTING_MODE', settings.routingMode),
-    line('DEFAULT_AGENT', settings.defaultAgent),
     'MAX_ACTIVE_TASKS_PER_USER=3',
     'STREAM_FLUSH_MS=800',
     'STREAM_TIMEOUT_MS=330000',
-    'CODEX_ROUTE_CONFIDENCE=0.85',
     'HEALTH_PORT=8787',
-    'ROUTER_AGENT_PROFILE_PATH=.runtime/router-agent.profile.json',
-    'ROUTER_AGENT_MEMORY_PATH=.runtime/router-memory.json',
+    'PERSONA_PROFILE_PATH=.runtime/persona-profile.json',
     '',
-    '# 语义路由模型；codex_all 模式下可以留空',
-    line('LLM_BASE_URL', settings.llmBaseUrl),
-    line('LLM_API_KEY', settings.llmApiKey),
-    line('LLM_MODEL', settings.llmModel),
-    'LLM_SYSTEM_PROMPT=',
-    'LLM_TIMEOUT_MS=180000',
-    '',
-    '# Codex CLI 策略；模型、推理强度和速度留空时继承安装人的 Codex 配置',
+    '# Codex CLI 策略；模型、推理强度和速度留空时继承使用者的 Codex 配置',
     'CODEX_COMMAND=codex',
     line('CODEX_MODEL', settings.codexModel),
     line('CODEX_FALLBACK_MODEL', settings.codexFallbackModel),
@@ -87,12 +76,6 @@ export function buildEnv(settings) {
     'DOCUMENT_MAX_BYTES=52428800',
     'DOCUMENT_ATTACHMENT_TTL_MS=900000',
     '',
-    '# 本地 Agent；未选择时留空',
-    line('LOCAL_AGENT_URL', settings.localAgentUrl),
-    line('LOCAL_AGENT_TOKEN', settings.localAgentToken),
-    'LOCAL_AGENT_TIMEOUT_MS=600000',
-    'ALLOW_REMOTE_LOCAL_AGENT=false',
-    '',
   ].join('\n');
 }
 
@@ -107,11 +90,5 @@ export function buildProfile(settings) {
     offTopicReminderThreshold: settings.offTopicReminderEnabled
       ? settings.offTopicReminderThreshold
       : 0,
-    memory: {
-      recentTurnsPerSession: 8,
-      maxTurnCharacters: 600,
-      maxUserFacts: 20,
-      maxFactCharacters: 240,
-    },
   };
 }

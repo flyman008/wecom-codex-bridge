@@ -14,7 +14,7 @@ if (!existsSync(envPath)) {
 
 const env = parseEnvFile(readFileSync(envPath, 'utf8'));
 if (env.SERVICE_AUTOSTART !== 'true' && env.SERVICE_AUTOSTART !== 'false') {
-  console.error('SERVICE_AUTOSTART 必须由安装人设置为 true 或 false；请重新运行 npm run setup。');
+  console.error('SERVICE_AUTOSTART 必须由使用者设置为 true 或 false；请重新运行 npm run setup。');
   process.exit(1);
 }
 

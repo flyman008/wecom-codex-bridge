@@ -1,11 +1,11 @@
+import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
+
 import { CodexCliAgent } from './agents/codex-cli.js';
-import { LocalHttpAgent } from './agents/local-http.js';
-import { OpenAiCompatibleAgent } from './agents/openai-compatible.js';
 import { loadConfig, loadEnvFileIfPresent } from './config.js';
 import { startHealthServer } from './health.js';
 import { logger } from './logger.js';
-import { RouterAgent } from './router-agent.js';
-import { VolcanoSemanticRouter } from './semantic-router.js';
+import { PersonaProfile } from './persona-profile.js';
 import type { AgentAdapter, AgentName } from './types.js';
 import { WeComAgentService } from './wecom-service.js';
 
@@ -24,19 +24,10 @@ async function main(): Promise<void> {
   await writeServicePid();
   loadEnvFileIfPresent();
   const config = loadConfig();
-  const agentList: AgentAdapter[] = [
-    new OpenAiCompatibleAgent(config.llm),
-    new CodexCliAgent(config.codex),
-    new LocalHttpAgent(config.localAgent),
-  ];
+  const agentList: AgentAdapter[] = [new CodexCliAgent(config.codex)];
   const agents = new Map<AgentName, AgentAdapter>(agentList.map((agent) => [agent.name, agent]));
-  const semanticRouter = new VolcanoSemanticRouter(config.llm);
-  const routerAgent = await RouterAgent.create(
-    config.routerAgent,
-    semanticRouter,
-    config.wecom.secret,
-  );
-  const service = new WeComAgentService(config, agents, routerAgent);
+  const persona = await PersonaProfile.load(config.persona);
+  const service = new WeComAgentService(config, agents, persona);
   const health = startHealthServer(config.healthPort, service);
 
   for (const agent of agentList) {
@@ -46,13 +37,10 @@ async function main(): Promise<void> {
       ...(agent.isAvailable() ? {} : { reason: agent.unavailableReason() }),
     });
   }
-  logger.info(config.router.mode === 'codex_all' ? 'Codex 对话人设已加载' : '总管 Agent 已加载', {
-    name: routerAgent.name,
-    routingMode: config.router.mode,
-  });
+  logger.info('Codex 对话人设已加载', { name: persona.name });
 
   service.start();
-  logger.info('企微 Agent 路由服务已启动', { health: `http://127.0.0.1:${config.healthPort}/health` });
+  logger.info('企微 Codex 桥接服务已启动', { health: `http://127.0.0.1:${config.healthPort}/health` });
 
   const shutdown = (signal: string) => {
     logger.info('正在停止服务', { signal });
@@ -71,5 +59,3 @@ main().catch(async (error) => {
   await removeServicePid();
   process.exitCode = 1;
 });
-import { mkdir, rm, writeFile } from 'node:fs/promises';
-import { resolve } from 'node:path';

@@ -1,4 +1,4 @@
-export type AgentName = 'llm' | 'codex' | 'local';
+export type AgentName = 'codex';
 
 export type AgentOperation = 'document_to_wecom' | 'spreadsheet_to_wecom';
 
@@ -19,7 +19,6 @@ export interface AgentRequest {
   prompt: string;
   quotedContext: string | undefined;
   personaPrompt?: string;
-  memoryContext?: string;
   sessionKey: string;
   signal: AbortSignal;
   operation?: AgentOperation;
@@ -31,11 +30,4 @@ export interface AgentAdapter {
   isAvailable(): boolean;
   unavailableReason(): string;
   run(request: AgentRequest): AsyncGenerator<AgentEvent, void>;
-}
-
-export interface RouteDecision {
-  agent?: AgentName;
-  prompt: string;
-  directReply?: string;
-  requiresSemanticRouting?: boolean;
 }

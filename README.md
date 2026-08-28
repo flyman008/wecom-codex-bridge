@@ -1,6 +1,6 @@
-# 自建企微 Agent 路由服务
+# 自建企微 Codex 桥接服务
 
-基于企业微信官方 Node.js 长连接 SDK 的本地常驻服务。安装人可以选择消息路由、人设、Codex 模型策略、会话方式、目录权限和是否登录后自动启动。支持 Windows 10/11 和 macOS。
+基于企业微信官方 Node.js 长连接 SDK 的本地常驻服务。企业微信消息直接进入使用者已登录的 Codex CLI。它依赖 Codex 提供的模型能力和有效账号；使用者可以通过 ChatGPT 账号或 OpenAI API Key 登录 Codex，但不需要再部署第二套模型服务或路由模型。使用者可以选择人设、Codex 模型策略、会话方式、目录权限和是否登录后自动启动。支持 Windows 10/11 和 macOS。
 
 如果准备让 Codex 帮你部署，克隆仓库后直接说：
 
@@ -23,10 +23,10 @@ npm run setup
 ## 当前能力
 
 - 企业微信 WebSocket 长连接、自动认证、心跳和断线重连。
-- `ROUTING_MODE=semantic` 时使用火山模型结构化路由；`ROUTING_MODE=codex_all` 时所有文字对话直接进入 Codex。
-- 对话人设由首次安装生成的 `.runtime/router-agent.profile.json` 管理；语义路由模式可使用本地 Memory，全量 Codex 模式不读取或写入本地 Memory。
+- 所有文字对话直接进入 Codex；Codex 是唯一的模型依赖。
+- 对话人设由首次安装生成的 `.runtime/persona-profile.json` 管理。
 - 群聊按发送人隔离会话；个人偏好可以跨群使用，群内最近对话不会串到其他群或其他人。
-- 语义路由模式下，明确说“请记住”时才保存稳定偏好；全量 Codex 模式由持久 Codex 会话自然保留上下文。
+- 可选择让同一企微会话持续使用同一个 Codex 会话，自然保留上下文。
 - 文本、语音转写、图文混排文本和文件附件接入。
 - 文件下载使用企微官方 SDK 解密，暂存 15 分钟，成功转换后自动清理。
 - 流式内容节流、最终结束、超时转后台及完成后主动通知。
@@ -40,19 +40,19 @@ npm run setup
 ```text
 企业微信官方 SDK
   → 消息标准化与去重
-  → 对话人设与会话隔离
-    ├─ semantic：火山模型判断后分配给模型、文档处理链路或本地 Agent
-    └─ codex_all：所有文字对话直接交给对应的持久 Codex 会话
+  → 本地规则识别明确的企微文档转换要求
+  → 对话人设与“发送人 + 单聊/群聊”会话隔离
+  → Codex CLI
   → 流式回复或主动通知
 ```
 
-官方 SDK 只承担企微连接与消息收发。本项目负责路由、任务状态和 Agent 适配。
+官方 SDK 只承担企微连接与消息收发。本项目负责会话隔离、任务状态、文件暂存和 Codex 调用。
 
 ## 环境要求
 
 - Windows 10/11 或当前受支持的 macOS
 - Node.js 20.12 或更高版本
-- 已安装并登录 Codex CLI
+- 已安装并登录 Codex CLI（可使用 ChatGPT 账号或 OpenAI API Key，见 [Codex 官方身份验证说明](https://developers.openai.com/codex/auth)）
 - 企业微信智能机器人已切换到 API 长连接模式
 
 ## 首次安装配置
@@ -65,24 +65,18 @@ npm run check
 npm run setup
 ```
 
-向导会让安装人逐项选择，而不是复制仓库作者的偏好：
+向导会让使用者逐项选择，不携带任何发布者的个人偏好：
 
-- 消息全部进入 Codex，还是先经过兼容模型语义路由；
 - 专业、温和或完全自定义的机器人人设；
 - 是否启用连续偏离工作话题提醒，以及提醒阈值和文案；
-- Codex 首选模型、额度降级模型、推理强度和 Fast 策略；这些项目均可留空并继承安装人自己的 Codex 配置；
+- Codex 首选模型、额度降级模型、推理强度和 Fast 策略；这些项目均可留空并继承使用者自己的 Codex 配置；
 - Codex 工作目录、附加授权目录、只读或可写沙箱；
 - 同一企微会话是否保持一个持续的 Codex 上下文；
 - 是否在当前用户登录后自动启动服务，并可立即应用选择；
-- 选择语义路由时所需的兼容模型与本地 Agent 配置。
 
-结果只写入被 Git 忽略的 `.env` 和 `.runtime/router-agent.profile.json`。`.env.example` 与 `router-agent.profile.example.json` 只是中性字段示例，不代表推荐策略。详细解释见 [安装配置项](docs/configuration.md)。
+结果只写入被 Git 忽略的 `.env` 和 `.runtime/persona-profile.json`。`.env.example` 与 `persona-profile.example.json` 只是中性字段示例，不代表推荐策略。详细解释见 [安装配置项](docs/configuration.md)。
 
-不要把 `.env` 提交到 Git，也不要在日志或聊天中输出凭证。默认不要配置整块磁盘到 `CODEX_ADDITIONAL_DIRS`；只添加用户明确授权的目录。
-
-### 关于火山 Coding Plan
-
-OpenAI 兼容模式应使用 Coding Plan 专用地址 `https://ark.cn-beijing.volces.com/api/coding/v3`。不要误用不含 `/coding` 的常规模型地址，以免走到不同计费通道。地址和模型仍通过 `.env` 配置，不写死在产品代码中。
+Codex 登录默认由 `codex login` 管理，不写入本项目的 `.env`。不要把 `.env` 提交到 Git，也不要在日志或聊天中输出凭证。默认不要配置整块磁盘到 `CODEX_ADDITIONAL_DIRS`；只添加用户明确授权的目录。
 
 ## 运行
 
@@ -108,7 +102,7 @@ macOS 常驻运行：
 ./scripts/stop-service.sh
 ```
 
-安装人可在 `npm run setup` 中选择是否自动启动。以后修改 `.env` 中的 `SERVICE_AUTOSTART` 后，可统一应用：
+使用者可在 `npm run setup` 中选择是否自动启动。以后修改 `.env` 中的 `SERVICE_AUTOSTART` 后，可统一应用：
 
 ```bash
 npm run autostart:apply
@@ -152,7 +146,7 @@ curl http://127.0.0.1:8787/health
 
 ## 企微使用方式
 
-全量 Codex 模式下直接发送自然语言即可，不需要 `/ask` 或 `/codex` 指令。
+直接发送自然语言即可，不需要命令前缀。
 
 文件生成企微在线内容：
 
@@ -162,41 +156,20 @@ curl http://127.0.0.1:8787/health
 
 也可以引用文件消息并发送“生成企微在线文档”。支持 HTML、Markdown、TXT、Word、PDF、PPT、Excel、CSV、JSON、XML 及部分常见国产办公格式；复杂排版和旧版二进制格式属于尽力转换。
 
-## 本地 Agent 接口约定
-
-服务向配置地址发送 `POST application/json`：
-
-```json
-{
-  "prompt": "用户任务",
-  "quotedContext": "用户引用的资料，可为空",
-  "personaPrompt": "总管 Agent 的固定人设",
-  "memoryContext": "该发送人的个人记忆与当前会话最近内容",
-  "session": "经过哈希处理的稳定会话键",
-  "stream": true
-}
-```
-
-本地 Agent 可以返回：
-
-- JSON：`{"text":"最终结果"}`；
-- SSE：每个 `data:` 行为纯文本，或包含 `text` / `content` / OpenAI 兼容增量结构，最后发送 `[DONE]`。
-
 ## 当前边界
 
 - 转换要求和去重状态只保存在内存中；未过期的暂存附件可在服务重启后按会话恢复。
-- 语义路由模式的总管 Agent Memory 可持久化；全量 Codex 模式停止读取和写入该 Memory。
-- 全量 Codex 的会话映射仅保存哈希会话键与 Codex thread ID，原始人员和群聊标识不会写入文件。
-- 图片和视频暂不交给 Agent；支持的文件可作为当前 Codex 对话资料，只有用户明确要求时才生成企微在线文档或表格。
+- 持久 Codex 会话映射仅保存哈希会话键与 Codex thread ID，原始人员和群聊标识不会写入文件。
+- 图片和视频暂不交给 Codex；支持的文件可作为当前 Codex 对话资料，只有用户明确要求时才生成企微在线文档或表格。
 - 自启动使用当前用户启动项，以便复用该用户的 Codex CLI 登录态。
 - macOS 的 LaunchAgent 与 Windows 计划任务实现不同，但业务链路和会话数据格式一致。
-- `semantic` 模式下 Codex 仍受文档任务白名单约束；`codex_all` 模式下所有文字任务均可进入 Codex。
+- 所有文字任务进入 Codex；明确的企微文档转换要求由本地规则识别，不调用额外模型。
 - 未使用危险的 Codex 无沙箱参数；需要更高权限的任务必须在本机人工执行。
 
 ## 仓库文档
 
-- [部署代理说明](AGENTS.md)：给同事的 Codex 读取。
-- [安装配置项](docs/configuration.md)：哪些决策由安装人选择。
+- [部署代理说明](AGENTS.md)：给使用者的 Codex 读取。
+- [安装配置项](docs/configuration.md)：哪些决策由使用者选择。
 - [最终架构](docs/architecture.md)：消息、会话、模型与文件链路。
 - [安全边界](docs/security.md)：密钥、目录权限、日志和发布检查。
 - [Windows 部署](docs/setup-windows.md)

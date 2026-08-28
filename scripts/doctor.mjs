@@ -38,16 +38,11 @@ if (existsSync(envPath)) {
   add('WeCom bot credentials', Boolean(process.env.WECOM_BOT_ID && process.env.WECOM_BOT_SECRET), 'configured');
   add('Codex workdir', Boolean(process.env.CODEX_WORKDIR), 'configured');
   add(
-    'Routing choice',
-    process.env.ROUTING_MODE === 'semantic' || process.env.ROUTING_MODE === 'codex_all',
-    process.env.ROUTING_MODE || 'not configured',
-  );
-  add(
     'Autostart choice',
     process.env.SERVICE_AUTOSTART === 'true' || process.env.SERVICE_AUTOSTART === 'false',
     process.env.SERVICE_AUTOSTART || 'not configured',
   );
-  const configuredProfilePath = process.env.ROUTER_AGENT_PROFILE_PATH || '.runtime/router-agent.profile.json';
+  const configuredProfilePath = process.env.PERSONA_PROFILE_PATH || '.runtime/persona-profile.json';
   const profilePath = isAbsolute(configuredProfilePath)
     ? configuredProfilePath
     : join(projectRoot, configuredProfilePath);
@@ -56,7 +51,6 @@ if (existsSync(envPath)) {
   add('.env', false, 'missing');
   add('WeCom bot credentials', false, 'not checked');
   add('Codex workdir', false, 'not checked');
-  add('Routing choice', false, 'not checked');
   add('Autostart choice', false, 'not checked');
   add('Local persona profile', false, 'not checked');
 }

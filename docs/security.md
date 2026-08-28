@@ -2,9 +2,9 @@
 
 ## 凭证
 
-- Bot ID、Bot Secret、模型 API Key 和企微 CLI 授权信息只能保存在部署机器本地。
-- `.env`、`.runtime/` 和 `logs/` 已加入 `.gitignore`。安装人生成的人设文件也位于 `.runtime/`，不会进入 Git。
-- 仓库中的 `.env.example` 与 `router-agent.profile.example.json` 只包含中性空白示例，不携带作者的人设、模型或自启动偏好。
+- Bot ID、Bot Secret、Codex 登录态和企微 CLI 授权信息只能保存在部署机器本地。
+- `.env`、`.runtime/` 和 `logs/` 已加入 `.gitignore`。使用者生成的人设文件也位于 `.runtime/`，不会进入 Git。
+- 仓库中的 `.env.example` 与 `persona-profile.example.json` 只包含中性空白示例，不携带任何部署者的人设、模型或自启动偏好。
 - 真实凭证一旦出现在聊天、截图、日志或 Git 历史中，应先轮换再发布。
 - 不提供包含真实值的示例配置。
 
@@ -27,7 +27,7 @@
 ```bash
 git status --short
 git ls-files
-git grep -n -I -E '(WECOM_BOT_SECRET|LLM_API_KEY)=.+' -- ':!*.example'
+git grep -n -I -E 'WECOM_BOT_SECRET=.+' -- ':!*.example'
 npm ci
 npm run check
 ```
@@ -40,4 +40,4 @@ npm run check
 - `node_modules/`
 - `dist/`
 - 本机绝对路径
-- Bot ID、Secret、API Key、userid、chatid
+- Bot ID、Secret、Codex 登录凭证、userid、chatid

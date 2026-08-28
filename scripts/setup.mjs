@@ -15,7 +15,7 @@ import {
 
 const projectRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const envPath = join(projectRoot, '.env');
-const profilePath = join(projectRoot, '.runtime', 'router-agent.profile.json');
+const profilePath = join(projectRoot, '.runtime', 'persona-profile.json');
 
 class SecretSafeOutput extends Writable {
   muted = false;
@@ -123,15 +123,6 @@ async function main() {
   const botId = await askText('企业微信 Bot ID', existingEnv.WECOM_BOT_ID, true);
   const botSecret = await askSecret('企业微信 Bot Secret（输入不会回显）', existingEnv.WECOM_BOT_SECRET, true);
 
-  const routingMode = await askChoice(
-    '消息处理方式',
-    [
-      { label: '所有对话直接交给 Codex，并保持会话上下文', value: 'codex_all' },
-      { label: '先由兼容模型判断，再分配给模型、Codex 或本地 Agent', value: 'semantic' },
-    ],
-    existingEnv.ROUTING_MODE || 'codex_all',
-  );
-
   const existingProfile = readExistingJson(profilePath);
   const personaPreset = await askChoice(
     '机器人回复人设',
@@ -169,7 +160,7 @@ async function main() {
       )
     : '';
 
-  console.log('\nCodex 模型名、推理强度和速度都可以留空；留空会继承安装人自己的 Codex 配置。');
+  console.log('\nCodex 模型名、推理强度和速度都可以留空；留空会继承使用者自己的 Codex 配置。');
   const codexModel = await askText('Codex 首选模型', existingEnv.CODEX_MODEL);
   const codexFallbackModel = await askText(
     '额度或限流时使用的备用模型（可留空）',
@@ -220,31 +211,6 @@ async function main() {
     !existingBoolean(existingEnv.CODEX_EPHEMERAL, false),
   );
 
-  let llmBaseUrl = existingEnv.LLM_BASE_URL || '';
-  let llmApiKey = existingEnv.LLM_API_KEY || '';
-  let llmModel = existingEnv.LLM_MODEL || '';
-  let defaultAgent = existingEnv.DEFAULT_AGENT || 'llm';
-  let localAgentUrl = existingEnv.LOCAL_AGENT_URL || '';
-  let localAgentToken = existingEnv.LOCAL_AGENT_TOKEN || '';
-  if (routingMode === 'semantic') {
-    console.log('\n语义路由需要一个允许接入自建应用的 OpenAI 兼容模型。');
-    llmBaseUrl = await askText('兼容模型 API 地址', llmBaseUrl, true);
-    llmApiKey = await askSecret('兼容模型 API Key（输入不会回显）', llmApiKey, true);
-    llmModel = await askText('兼容模型名称', llmModel, true);
-    defaultAgent = await askChoice(
-      '普通问题默认交给谁处理',
-      [
-        { label: '兼容模型', value: 'llm' },
-        { label: '本地 Agent HTTP 服务', value: 'local' },
-      ],
-      defaultAgent,
-    );
-    if (defaultAgent === 'local') {
-      localAgentUrl = await askText('本地 Agent URL', localAgentUrl, true);
-      localAgentToken = await askSecret('本地 Agent Token（可留空）', localAgentToken, false);
-    }
-  }
-
   const autostart = await askYesNo(
     '当前用户登录后是否自动启动服务',
     existingBoolean(existingEnv.SERVICE_AUTOSTART, false),
@@ -255,11 +221,6 @@ async function main() {
     botId,
     botSecret,
     autostart,
-    routingMode,
-    defaultAgent,
-    llmBaseUrl,
-    llmApiKey,
-    llmModel,
     codexModel,
     codexFallbackModel,
     codexReasoningEffort,
@@ -268,8 +229,6 @@ async function main() {
     codexAdditionalDirs,
     codexSandbox,
     codexEphemeral: !persistentConversation,
-    localAgentUrl,
-    localAgentToken,
   });
   const profile = buildProfile({
     name,
@@ -285,7 +244,7 @@ async function main() {
     encoding: 'utf8',
     mode: 0o600,
   });
-  console.log('\n本机配置已写入 .env 和 .runtime/router-agent.profile.json。');
+  console.log('\n本机配置已写入 .env 和 .runtime/persona-profile.json。');
 
   if (applyAutostartNow) {
     const result = spawnSync(process.execPath, [join(projectRoot, 'scripts', 'apply-autostart.mjs')], {

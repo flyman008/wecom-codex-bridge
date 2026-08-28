@@ -8,12 +8,12 @@
   → 消息标准化、去重和并发限制
   → 生成“会话 + 发送人”隔离键
   → 查找持久 Codex thread
-  → 安装人选择的 Codex 首选模型与推理策略
-  → 额度不足时可选安装人指定的备用模型
+  → 使用者选择的 Codex 首选模型与推理策略
+  → 额度不足时可选使用者指定的备用模型
   → 流式回复、主动通知或媒体消息
 ```
 
-安装人可选择 `ROUTING_MODE=codex_all` 或 `semantic`。仓库不替安装人决定路由方式。
+消息不经过独立路由模型，直接进入 Codex。明确的企微文档转换要求由本地规则识别。
 
 ## 会话隔离
 
@@ -24,9 +24,9 @@
 
 ## 模型链
 
-1. `CODEX_MODEL` 由安装人指定；留空时继承其 Codex 默认模型。
+1. `CODEX_MODEL` 由使用者指定；留空时继承其 Codex 默认模型。
 2. `CODEX_FALLBACK_MODEL` 可留空；配置后仅在额度、配额或限流错误时切换。
-3. `CODEX_REASONING_EFFORT` 和 `CODEX_SERVICE_TIER` 由安装人选择；留空时继承 Codex 配置。
+3. `CODEX_REASONING_EFFORT` 和 `CODEX_SERVICE_TIER` 由使用者选择；留空时继承 Codex 配置。
 4. Fast 只在所选模型支持时传递，避免发送无效配置。
 
 网络失败、工具失败和业务失败不会触发模型切换，避免重复执行有副作用的任务。

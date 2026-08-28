@@ -59,12 +59,11 @@ test('只有额度、配额或限流错误触发 Codex 模型降级', () => {
   assert.equal(isCodexCapacityError(new Error('tool execution failed')), false);
 });
 
-test('Codex 普通对话提示支持人设、可选上下文和附件', () => {
+test('Codex 普通对话提示支持人设和附件', () => {
   const prompt = buildCodexGeneralPrompt({
     prompt: '总结一下这个文件',
     quotedContext: '补充说明',
     personaPrompt: '暖男型工作搭档',
-    memoryContext: '用户喜欢简洁回复',
     sessionKey: 'session',
     signal: new AbortController().signal,
     attachments: [
@@ -77,7 +76,6 @@ test('Codex 普通对话提示支持人设、可选上下文和附件', () => {
     ],
   });
   assert.match(prompt, /暖男型工作搭档/);
-  assert.match(prompt, /用户喜欢简洁回复/);
   assert.match(prompt, /D:\\task\\report\.pdf/);
   assert.match(prompt, /总结一下这个文件/);
   assert.match(prompt, /不得因为存在附件就自动创建企微文档/);
@@ -90,10 +88,10 @@ test('从 Codex 图片生成完成事件提取本地图片路径', () => {
       type: 'item.completed',
       item: {
         type: 'image_generation',
-        saved_path: 'C:\\Users\\Administrator\\.codex\\generated_images\\example.png',
+        saved_path: 'C:\\Users\\Example\\.codex\\generated_images\\example.png',
       },
     }),
-    'C:\\Users\\Administrator\\.codex\\generated_images\\example.png',
+    'C:\\Users\\Example\\.codex\\generated_images\\example.png',
   );
   assert.equal(
     extractCodexImagePath({

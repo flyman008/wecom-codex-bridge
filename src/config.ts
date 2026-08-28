@@ -1,8 +1,6 @@
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import type { AgentName } from './types.js';
-
 export interface AppConfig {
   wecom: {
     botId: string;
@@ -10,26 +8,15 @@ export interface AppConfig {
     heartbeatIntervalMs: number;
     maxReconnectAttempts: number;
   };
-  router: {
-    mode: 'semantic' | 'codex_all';
-    defaultAgent: AgentName;
+  processing: {
     maxActiveTasksPerUser: number;
     streamFlushMs: number;
     streamTimeoutMs: number;
-    codexConfidenceThreshold: number;
   };
-  routerAgent: {
+  persona: {
     profilePath: string;
-    memoryPath: string;
   };
   healthPort: number;
-  llm: {
-    baseUrl: string | undefined;
-    apiKey: string | undefined;
-    model: string | undefined;
-    systemPrompt: string;
-    timeoutMs: number;
-  };
   codex: {
     command: string;
     model: string | undefined;
@@ -48,18 +35,6 @@ export interface AppConfig {
     maxBytes: number;
     attachmentTtlMs: number;
   };
-  localAgent: {
-    url: string | undefined;
-    token: string | undefined;
-    timeoutMs: number;
-    allowRemote: boolean;
-  };
-}
-
-export function parseRoutingMode(value: string | undefined): 'semantic' | 'codex_all' {
-  const normalized = value?.trim().toLowerCase() || 'semantic';
-  if (normalized === 'semantic' || normalized === 'codex_all') return normalized;
-  throw new Error('ROUTING_MODE 只能是 semantic 或 codex_all');
 }
 
 export function loadEnvFileIfPresent(path = resolve('.env')): void {
@@ -96,34 +71,12 @@ function integer(env: NodeJS.ProcessEnv, key: string, fallback: number, min = 1)
   return value;
 }
 
-function decimal(
-  env: NodeJS.ProcessEnv,
-  key: string,
-  fallback: number,
-  min: number,
-  max: number,
-): number {
-  const raw = optional(env, key);
-  if (!raw) return fallback;
-  const value = Number(raw);
-  if (!Number.isFinite(value) || value < min || value > max) {
-    throw new Error(`${key} 必须是 ${min} 到 ${max} 之间的数字`);
-  }
-  return value;
-}
-
 function boolean(env: NodeJS.ProcessEnv, key: string, fallback: boolean): boolean {
   const raw = optional(env, key)?.toLowerCase();
   if (!raw) return fallback;
   if (raw === 'true' || raw === '1') return true;
   if (raw === 'false' || raw === '0') return false;
   throw new Error(`${key} 必须是 true 或 false`);
-}
-
-function defaultAgent(env: NodeJS.ProcessEnv): AgentName {
-  const value = optional(env, 'DEFAULT_AGENT') ?? 'llm';
-  if (value === 'llm' || value === 'local') return value;
-  throw new Error('DEFAULT_AGENT 只能是 llm 或 local；Codex 仅允许用于文档转企微在线文档');
 }
 
 function codexSandbox(env: NodeJS.ProcessEnv): 'read-only' | 'workspace-write' {
@@ -149,30 +102,17 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       heartbeatIntervalMs: integer(env, 'WECOM_HEARTBEAT_MS', 30_000, 5_000),
       maxReconnectAttempts: reconnectAttempts(env),
     },
-    router: {
-      mode: parseRoutingMode(optional(env, 'ROUTING_MODE')),
-      defaultAgent: defaultAgent(env),
+    processing: {
       maxActiveTasksPerUser: integer(env, 'MAX_ACTIVE_TASKS_PER_USER', 3),
       streamFlushMs: integer(env, 'STREAM_FLUSH_MS', 800, 100),
       streamTimeoutMs: integer(env, 'STREAM_TIMEOUT_MS', 330_000, 10_000),
-      codexConfidenceThreshold: decimal(env, 'CODEX_ROUTE_CONFIDENCE', 0.85, 0.5, 1),
     },
-    routerAgent: {
+    persona: {
       profilePath: resolve(
-        optional(env, 'ROUTER_AGENT_PROFILE_PATH') ?? '.runtime/router-agent.profile.json',
+        optional(env, 'PERSONA_PROFILE_PATH') ?? '.runtime/persona-profile.json',
       ),
-      memoryPath: resolve(optional(env, 'ROUTER_AGENT_MEMORY_PATH') ?? '.runtime/router-memory.json'),
     },
     healthPort: integer(env, 'HEALTH_PORT', 8787, 0),
-    llm: {
-      baseUrl: optional(env, 'LLM_BASE_URL'),
-      apiKey: optional(env, 'LLM_API_KEY'),
-      model: optional(env, 'LLM_MODEL'),
-      systemPrompt:
-        optional(env, 'LLM_SYSTEM_PROMPT') ??
-        '你是企业微信里的工作助手。请准确回答，并遵守本次部署配置的人设与会话规则。',
-      timeoutMs: integer(env, 'LLM_TIMEOUT_MS', 180_000, 1_000),
-    },
     codex: {
       command: optional(env, 'CODEX_COMMAND') ?? 'codex',
       model: optional(env, 'CODEX_MODEL'),
@@ -192,12 +132,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       stagingDir: resolve(optional(env, 'DOCUMENT_STAGING_DIR') ?? '.runtime/incoming'),
       maxBytes: integer(env, 'DOCUMENT_MAX_BYTES', 50 * 1024 * 1024, 1_024),
       attachmentTtlMs: integer(env, 'DOCUMENT_ATTACHMENT_TTL_MS', 15 * 60_000, 60_000),
-    },
-    localAgent: {
-      url: optional(env, 'LOCAL_AGENT_URL'),
-      token: optional(env, 'LOCAL_AGENT_TOKEN'),
-      timeoutMs: integer(env, 'LOCAL_AGENT_TIMEOUT_MS', 600_000, 1_000),
-      allowRemote: boolean(env, 'ALLOW_REMOTE_LOCAL_AGENT', false),
     },
   };
 }

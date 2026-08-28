@@ -15,15 +15,11 @@ import { readFile, stat } from 'node:fs/promises';
 import { basename } from 'node:path';
 
 import type { AppConfig } from './config.js';
-import { conversionOperationFor } from './conversion-policy.js';
+import { conversionOperationFor, isWeComConversionRequest } from './conversion-policy.js';
 import { logger, privateLabel, sdkLogger } from './logger.js';
 import { PendingConversionStore, PendingFileStore } from './pending-files.js';
-import { RouterAgent } from './router-agent.js';
-import { decideRoute, HELP_TEXT, normalizeIncomingText } from './router.js';
-import {
-  canDispatchFileToCodex,
-  type SemanticRouteDecision,
-} from './semantic-router.js';
+import { PersonaProfile } from './persona-profile.js';
+import { HELP_TEXT, isHelpRequest, normalizeIncomingText } from './message-input.js';
 import { TaskRegistry } from './task-registry.js';
 import type {
   AgentAdapter,
@@ -67,9 +63,9 @@ export class WeComAgentService {
   constructor(
     private readonly config: AppConfig,
     private readonly agents: Map<AgentName, AgentAdapter>,
-    private readonly routerAgent: RouterAgent,
+    private readonly persona: PersonaProfile,
   ) {
-    this.registry = new TaskRegistry(config.router.maxActiveTasksPerUser);
+    this.registry = new TaskRegistry(config.processing.maxActiveTasksPerUser);
     this.pendingFiles = new PendingFileStore(config.documents);
     this.pendingConversions = new PendingConversionStore(config.documents.attachmentTtlMs);
     this.client = new WSClient({
@@ -245,130 +241,46 @@ export class WeComAgentService {
     this.controllers.add(controller);
 
     try {
-      const directToCodex = this.config.router.mode === 'codex_all';
-      let route = directToCodex
-        ? { agent: 'codex' as const, prompt: text }
-        : decideRoute(text, this.config.router.defaultAgent);
-      if (route.directReply) {
-        await this.replyDirect(frame, route.directReply);
+      if (isHelpRequest(text)) {
+        await this.replyDirect(frame, HELP_TEXT);
         return;
       }
 
       let attachment = await this.pendingFiles.get(sessionKey);
-      let semanticDecision: SemanticRouteDecision | undefined;
-      let focusReminder: string | undefined;
-      let personaPrompt = this.routerAgent.personaPrompt;
-      let memoryContext: string | undefined;
-      let suppressAssistantMemory = false;
       let operation: AgentOperation | undefined;
-      const scope = body.chattype === 'group' ? 'group' : 'single';
-      const requiresAutomaticRouting = route.requiresSemanticRouting === true;
-      if (!directToCodex && (requiresAutomaticRouting || route.agent === 'llm')) {
+      const wantsFileConversion = isWeComConversionRequest(text);
+      if (wantsFileConversion && !attachment && body.quote?.file) {
         try {
-          const routerTurn = await this.routerAgent.decide(
-            {
-              actorKey,
-              sessionKey,
-              scope,
-              text,
-              ...(attachment
-                ? {
-                    attachment: {
-                      fileName: attachment.fileName,
-                      extension: attachment.extension,
-                      sizeBytes: attachment.sizeBytes,
-                    },
-                  }
-                : {}),
-            },
-            controller.signal,
-          );
-          semanticDecision = routerTurn.decision;
-          focusReminder = routerTurn.focusReminder;
-          personaPrompt = routerTurn.personaPrompt;
-          memoryContext = routerTurn.memoryContext;
-          suppressAssistantMemory = routerTurn.suppressAssistantMemory;
+          attachment = await this.downloadAndStore(sessionKey, body.quote.file);
         } catch (error) {
-          logger.warn('火山路由判断失败，已按非 Codex 路由处理', {
-            error: errorMessage(error),
-            session: label,
-          });
+          logger.warn('引用文件下载失败', { error: errorMessage(error), session: label });
+          await this.replyDirect(frame, '引用的文件没下载好，请重新发一次。');
+          return;
         }
-      } else if (route.agent === 'local') {
-        const knownTurn = await this.routerAgent.prepareKnownWorkTurn({
-          actorKey,
-          sessionKey,
-          scope,
-          text,
-          ...(attachment
-            ? {
-                attachment: {
-                  fileName: attachment.fileName,
-                  extension: attachment.extension,
-                  sizeBytes: attachment.sizeBytes,
-                },
-              }
-            : {}),
+      }
+
+      if (wantsFileConversion && !attachment) {
+        this.pendingConversions.set(sessionKey, {
+          prompt: text,
+          quotedContext: quoteText(body.quote),
         });
-        personaPrompt = knownTurn.personaPrompt;
-        memoryContext = knownTurn.memoryContext;
-      }
-
-      if (requiresAutomaticRouting) {
-        const wantsFileConversion =
-          semanticDecision?.intent === 'file_to_wecom' &&
-          semanticDecision.confidence >= this.config.router.codexConfidenceThreshold;
-        if (wantsFileConversion && !attachment) {
-          attachment = await this.pendingFiles.get(sessionKey);
-        }
-        if (wantsFileConversion && !attachment && body.quote?.file) {
-          try {
-            attachment = await this.downloadAndStore(sessionKey, body.quote.file);
-          } catch (error) {
-            await this.replyDirect(frame, `引用的文件没下载好，请重新发一次。`);
-            return;
-          }
-        }
-
-        if (wantsFileConversion && !attachment) {
-          this.pendingConversions.set(sessionKey, {
-            prompt: text,
-            quotedContext: quoteText(body.quote),
-          });
-          attachment = await this.pendingFiles.get(sessionKey);
-          if (!attachment) {
-            await this.replyDirect(
-              frame,
-              '好，我等你的文件。15分钟内发过来，收到后我会自动开始。',
-            );
-            return;
-          }
-        }
-
-        if (
-          semanticDecision &&
-          canDispatchFileToCodex(
-            semanticDecision,
-            attachment,
-            this.config.router.codexConfidenceThreshold,
-          )
-        ) {
-          route = { agent: 'codex', prompt: text };
-          operation = conversionOperationFor(attachment);
-        } else {
-          route = { agent: this.config.router.defaultAgent, prompt: text };
+        attachment = await this.pendingFiles.get(sessionKey);
+        if (!attachment) {
+          await this.replyDirect(
+            frame,
+            '好，我等你的文件。15分钟内发过来，收到后我会自动开始。',
+          );
+          return;
         }
       }
+      if (wantsFileConversion && attachment) operation = conversionOperationFor(attachment);
 
-      const agent = route.agent ? this.agents.get(route.agent) : undefined;
-      await this.executeAgent(frame, body, agent, route.prompt, sessionKey, controller, {
+      const agent = this.agents.get('codex');
+      await this.executeAgent(frame, body, agent, text, sessionKey, controller, {
         ...(attachment ? { attachment } : {}),
         ...(operation ? { operation } : {}),
         quotedContext: quoteText(body.quote),
-        ...(focusReminder ? { completionSuffix: focusReminder } : {}),
-        personaPrompt,
-        ...(memoryContext ? { memoryContext } : {}),
-        suppressAssistantMemory,
+        personaPrompt: this.persona.prompt,
       });
     } finally {
       controller.abort();
@@ -388,10 +300,7 @@ export class WeComAgentService {
       attachment?: AgentAttachment;
       operation?: AgentOperation;
       quotedContext: string | undefined;
-      completionSuffix?: string;
       personaPrompt?: string;
-      memoryContext?: string;
-      suppressAssistantMemory?: boolean;
     },
   ): Promise<boolean> {
     if (!agent) {
@@ -414,8 +323,8 @@ export class WeComAgentService {
     const target = body.chattype === 'group' ? body.chatid : body.from.userid;
     const label = privateLabel(sessionKey);
     const responder = new WeComStreamResponder(this.client, frame, generateReqId('stream'), {
-      flushMs: this.config.router.streamFlushMs,
-      timeoutMs: this.config.router.streamTimeoutMs,
+      flushMs: this.config.processing.streamFlushMs,
+      timeoutMs: this.config.processing.streamTimeoutMs,
       ...(target ? { proactiveTarget: target } : {}),
     });
 
@@ -428,13 +337,11 @@ export class WeComAgentService {
             ? '文件收到了，正在生成企微普通在线文档…'
             : '我来看看…',
       );
-      let assistantOutput = '';
       const generatedImages: string[] = [];
       for await (const event of agent.run({
         prompt,
         quotedContext: context.quotedContext,
         ...(context.personaPrompt ? { personaPrompt: context.personaPrompt } : {}),
-        ...(context.memoryContext ? { memoryContext: context.memoryContext } : {}),
         sessionKey,
         signal: controller.signal,
         ...(conversionOperation ? { operation: conversionOperation } : {}),
@@ -444,34 +351,11 @@ export class WeComAgentService {
           if (!generatedImages.includes(event.filePath)) generatedImages.push(event.filePath);
           continue;
         }
-        if (event.kind === 'delta') assistantOutput += event.text;
-        else if (event.kind === 'replace') assistantOutput = event.text;
         await responder.update(event);
-      }
-      if (context.completionSuffix) {
-        assistantOutput += `${assistantOutput ? '\n\n' : ''}${context.completionSuffix}`;
-        await responder.update({ kind: 'delta', text: `\n\n${context.completionSuffix}` });
       }
       await responder.complete();
       for (const imagePath of generatedImages) {
         await this.sendGeneratedImage(target, imagePath, label);
-      }
-      if (this.config.router.mode !== 'codex_all') {
-        await this.routerAgent
-          .recordAssistant(
-            body.from.userid,
-            sessionKey,
-            body.chattype === 'group' ? 'group' : 'single',
-            assistantOutput,
-            agent.name,
-            context.suppressAssistantMemory ?? false,
-          )
-          .catch((error) =>
-            logger.warn('总管 Agent Memory 写入失败', {
-              error: errorMessage(error),
-              session: label,
-            }),
-          );
       }
       if (isFileConversion) {
         this.pendingConversions.remove(sessionKey);
