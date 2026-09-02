@@ -66,6 +66,20 @@ export function buildCodexRetryPrompt(originalPrompt: string): string {
   ].join('\n');
 }
 
+export function shouldRotateCodexSessionAfterTransient(
+  initialThreadId: string | undefined,
+  activeThreadId: string | undefined,
+  alreadyRotated: boolean,
+  ephemeral: boolean,
+): boolean {
+  return Boolean(
+    !ephemeral &&
+      !alreadyRotated &&
+      initialThreadId &&
+      activeThreadId === initialThreadId,
+  );
+}
+
 export function codexModelCandidates(
   model: string | undefined,
   fallbackModel: string | undefined,
@@ -549,7 +563,9 @@ export class CodexCliAgent implements AgentAdapter {
       : () => undefined;
     const store = persistentConversation ? await this.sessionStore : undefined;
     const existingThreadId = store?.get(request.sessionKey);
+    const initialThreadId = existingThreadId;
     let activeThreadId = existingThreadId;
+    let sessionRotated = false;
     const generatedImagesBefore = snapshotGeneratedImages(existingThreadId);
     const emittedImages = new Set<string>();
 
@@ -593,9 +609,22 @@ export class CodexCliAgent implements AgentAdapter {
               transientRetry < this.config.transientRetries
             ) {
               transientRetry += 1;
+              const rotateSession = shouldRotateCodexSessionAfterTransient(
+                initialThreadId,
+                activeThreadId,
+                sessionRotated,
+                this.config.ephemeral,
+              );
+              if (rotateSession) {
+                await store?.remove(request.sessionKey);
+                activeThreadId = undefined;
+                sessionRotated = true;
+              }
               yield {
                 kind: 'status',
-                text: `连接刚才中断了，正在自动重试（${transientRetry}/${this.config.transientRetries}）。`,
+                text: rotateSession
+                  ? '当前会话连接异常，我切到新会话继续处理。'
+                  : `连接刚才中断了，正在自动重试（${transientRetry}/${this.config.transientRetries}）。`,
               };
               await delay(Math.min(2_000, transientRetry * 1_000), undefined, { signal });
               attemptPrompt = buildCodexRetryPrompt(prompt);

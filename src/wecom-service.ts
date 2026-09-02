@@ -5,6 +5,8 @@ import {
   type EventMessage,
   type FileContent,
   type FileMessage,
+  type ImageContent,
+  type ImageMessage,
   type MixedMessage,
   type QuoteContent,
   type TextMessage,
@@ -16,6 +18,7 @@ import { basename } from 'node:path';
 
 import type { AppConfig } from './config.js';
 import { conversionOperationFor, isWeComConversionRequest } from './conversion-policy.js';
+import { IncomingImageStore, type StoredImageBatch } from './incoming-images.js';
 import { logger, privateLabel, sdkLogger } from './logger.js';
 import { PendingConversionStore, PendingFileStore } from './pending-files.js';
 import { PersonaProfile } from './persona-profile.js';
@@ -59,6 +62,7 @@ export class WeComAgentService {
   private readonly conversionSessions = new Set<string>();
   private readonly pendingFiles: PendingFileStore;
   private readonly pendingConversions: PendingConversionStore;
+  private readonly incomingImages: IncomingImageStore;
 
   constructor(
     private readonly config: AppConfig,
@@ -68,6 +72,7 @@ export class WeComAgentService {
     this.registry = new TaskRegistry(config.processing.maxActiveTasksPerUser);
     this.pendingFiles = new PendingFileStore(config.documents);
     this.pendingConversions = new PendingConversionStore(config.documents.attachmentTtlMs);
+    this.incomingImages = new IncomingImageStore(config.documents);
     this.client = new WSClient({
       botId: config.wecom.botId,
       secret: config.wecom.secret,
@@ -122,7 +127,9 @@ export class WeComAgentService {
     this.client.on('message.mixed', (frame) => {
       void this.handleMixed(frame).catch((error) => logger.error('图文消息处理失败', error));
     });
-    this.client.on('message.image', (frame) => void this.replyUnsupported(frame, '图片'));
+    this.client.on('message.image', (frame) => {
+      void this.handleImage(frame).catch((error) => logger.error('图片消息处理失败', error));
+    });
     this.client.on('message.file', (frame) => {
       void this.handleFile(frame).catch((error) => logger.error('文件消息处理失败', error));
     });
@@ -152,7 +159,14 @@ export class WeComAgentService {
     const body = frame.body;
     if (!body) return;
     const text = normalizeIncomingText(mixedText(body), body.chattype === 'group');
-    await this.handlePrompt(frame, body, text);
+    const images = body.mixed.msg_item.flatMap((item) => (item.image ? [item.image] : []));
+    await this.handlePrompt(frame, body, text, images);
+  }
+
+  private async handleImage(frame: WsFrame<ImageMessage>): Promise<void> {
+    const body = frame.body;
+    if (!body) return;
+    await this.handlePrompt(frame, body, '[图片]', [body.image]);
   }
 
   private sessionKey(body: BaseMessage): string {
@@ -167,6 +181,26 @@ export class WeComAgentService {
   ): Promise<import('./types.js').AgentAttachment> {
     const downloaded = await this.client.downloadFile(file.url, file.aeskey);
     return this.pendingFiles.store(sessionKey, downloaded.buffer, downloaded.filename);
+  }
+
+  private async downloadAndStoreImages(
+    sessionKey: string,
+    images: readonly ImageContent[],
+  ): Promise<StoredImageBatch> {
+    if (images.length > 9) throw new Error('一次最多处理9张图片');
+    const downloads: Array<{ buffer: Buffer; filename: string | undefined }> = [];
+    let totalBytes = 0;
+    for (const image of images) {
+      const downloaded = await this.client.downloadFile(image.url, image.aeskey);
+      totalBytes += downloaded.buffer.length;
+      if (totalBytes > this.config.documents.maxBytes) {
+        throw new Error(
+          `图片总大小超过限制（最大 ${Math.floor(this.config.documents.maxBytes / 1024 / 1024)} MB）`,
+        );
+      }
+      downloads.push({ buffer: downloaded.buffer, filename: downloaded.filename });
+    }
+    return this.incomingImages.store(sessionKey, downloads);
   }
 
   private async handleFile(frame: WsFrame<FileMessage>): Promise<void> {
@@ -225,6 +259,7 @@ export class WeComAgentService {
     frame: WsFrame<T>,
     body: T,
     text: string,
+    imageContents: readonly ImageContent[] = [],
   ): Promise<void> {
     const actorKey = body.from.userid;
     const messageKey = body.msgid;
@@ -239,8 +274,22 @@ export class WeComAgentService {
     const label = privateLabel(sessionKey);
     const controller = new AbortController();
     this.controllers.add(controller);
+    let imageBatch: StoredImageBatch | undefined;
 
     try {
+      if (imageContents.length) {
+        try {
+          imageBatch = await this.downloadAndStoreImages(sessionKey, imageContents);
+          logger.info('企微图片附件已暂存', {
+            count: imageBatch.attachments.length,
+            totalBytes: imageBatch.attachments.reduce((sum, item) => sum + item.sizeBytes, 0),
+          });
+        } catch (error) {
+          logger.error('企微图片附件暂存失败', error, { session: label });
+          await this.replyDirect(frame, '图片没收好，请重新发一次。');
+          return;
+        }
+      }
       if (isHelpRequest(text)) {
         await this.replyDirect(frame, HELP_TEXT);
         return;
@@ -276,13 +325,23 @@ export class WeComAgentService {
       if (wantsFileConversion && attachment) operation = conversionOperationFor(attachment);
 
       const agent = this.agents.get('codex');
+      const attachments = [
+        ...(imageBatch?.attachments ?? []),
+        ...(attachment ? [attachment] : []),
+      ];
       await this.executeAgent(frame, body, agent, text, sessionKey, controller, {
         ...(attachment ? { attachment } : {}),
+        ...(attachments.length ? { attachments } : {}),
         ...(operation ? { operation } : {}),
         quotedContext: quoteText(body.quote),
         personaPrompt: this.persona.prompt,
       });
     } finally {
+      if (imageBatch) {
+        await this.incomingImages
+          .remove(imageBatch.taskDirectory)
+          .catch((error) => logger.warn('图片暂存目录清理失败', { error: errorMessage(error) }));
+      }
       controller.abort();
       this.controllers.delete(controller);
       this.registry.finish(actorKey);
@@ -298,6 +357,7 @@ export class WeComAgentService {
     controller: AbortController,
     context: {
       attachment?: AgentAttachment;
+      attachments?: readonly AgentAttachment[];
       operation?: AgentOperation;
       quotedContext: string | undefined;
       personaPrompt?: string;
@@ -345,7 +405,11 @@ export class WeComAgentService {
         sessionKey,
         signal: controller.signal,
         ...(conversionOperation ? { operation: conversionOperation } : {}),
-        ...(context.attachment ? { attachments: [context.attachment] } : {}),
+        ...(context.attachments
+          ? { attachments: context.attachments }
+          : context.attachment
+            ? { attachments: [context.attachment] }
+            : {}),
       })) {
         if (event.kind === 'image') {
           if (!generatedImages.includes(event.filePath)) generatedImages.push(event.filePath);

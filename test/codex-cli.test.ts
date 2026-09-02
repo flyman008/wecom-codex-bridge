@@ -17,6 +17,7 @@ import {
   resolveCodexCommand,
   resolveWeComCliInvocation,
   resolveWeComCliScript,
+  shouldRotateCodexSessionAfterTransient,
 } from '../src/agents/codex-cli.js';
 
 test('Spark 使用轻度推理和自身极速通道', () => {
@@ -82,6 +83,14 @@ test('Codex 重试提示要求续跑且避免重复外部写入', () => {
   assert.match(prompt, /连接中断/);
   assert.match(prompt, /不要重复创建/);
   assert.match(prompt, /创建一份企微文档/);
+});
+
+test('持久旧会话首次断流时会切换到新会话', () => {
+  const threadId = '01a047b4-9a73-72d0-98fe-753fd6afa112';
+  assert.equal(shouldRotateCodexSessionAfterTransient(threadId, threadId, false, false), true);
+  assert.equal(shouldRotateCodexSessionAfterTransient(threadId, threadId, true, false), false);
+  assert.equal(shouldRotateCodexSessionAfterTransient(threadId, threadId, false, true), false);
+  assert.equal(shouldRotateCodexSessionAfterTransient(undefined, threadId, false, false), false);
 });
 
 test('Codex 普通对话提示支持人设和附件', () => {
