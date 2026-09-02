@@ -69,9 +69,28 @@ export class WeComStreamResponder {
     }
 
     this.streamClosed = true;
-    await this.enqueue(async () => {
-      await this.client.replyStream(this.frame, this.streamKey, content, true);
-    });
+    let streamError: unknown;
+    let streamDelivered = false;
+    try {
+      await this.enqueue(async () => {
+        await this.client.replyStream(this.frame, this.streamKey, content, true);
+      });
+      streamDelivered = true;
+    } catch (error) {
+      streamError = error;
+    }
+
+    // 企微偶尔会确认流式结束帧但客户端不展示；失败消息额外主动推送一次，确保用户可见。
+    let proactiveDelivered = false;
+    if (this.options.proactiveTarget) {
+      try {
+        await this.sendProactive(content);
+        proactiveDelivered = true;
+      } catch {
+        // 只要流式或主动消息任一路成功，就视为已经通知用户。
+      }
+    }
+    if (!streamDelivered && !proactiveDelivered) throw streamError;
   }
 
   private async detach(): Promise<void> {

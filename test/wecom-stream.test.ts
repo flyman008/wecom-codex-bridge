@@ -75,3 +75,26 @@ test('需要用户处理的错误可以原样回复', async () => {
   await responder.fail('请完成授权', true);
   assert.equal(calls.at(-1)?.content, '请完成授权');
 });
+
+test('处理失败时同时结束流式消息并主动通知', async () => {
+  const calls: Call[] = [];
+  const responder = new WeComStreamResponder(
+    fakeClient(calls),
+    { headers: { req_id: 'request' } } as WsFrameHeaders,
+    'stream',
+    { flushMs: 1, timeoutMs: 10_000, proactiveTarget: 'target' },
+  );
+  await responder.open('开始');
+  await responder.fail('稍后再试一次吧。');
+
+  assert.ok(
+    calls.some(
+      (call) =>
+        call.method === 'stream' &&
+        call.finish === true &&
+        call.content === '这次没处理好：稍后再试一次吧。',
+    ),
+  );
+  assert.equal(calls.at(-1)?.method, 'proactive');
+  assert.equal(calls.at(-1)?.content, '这次没处理好：稍后再试一次吧。');
+});

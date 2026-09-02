@@ -5,6 +5,7 @@ import { homedir } from 'node:os';
 import { basename, dirname, extname, isAbsolute, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { spawn } from 'node:child_process';
+import { setTimeout as delay } from 'node:timers/promises';
 
 import type { AppConfig } from '../config.js';
 import { CodexSessionStore } from '../codex-session-store.js';
@@ -42,6 +43,27 @@ export function isCodexCapacityError(error: unknown): boolean {
     /too many requests/i,
     /额度|配额|用量上限|调用上限|限流|请求过于频繁/,
   ].some((pattern) => pattern.test(message));
+}
+
+export function isCodexTransientError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return [
+    /stream disconnected before completion/i,
+    /websocket .*closed.*before response\.completed/i,
+    /(?:network |upstream )?connection (?:reset|closed|terminated|aborted)/i,
+    /\b(?:ECONNRESET|ETIMEDOUT|EAI_AGAIN|ENETUNREACH|ECONNREFUSED)\b/i,
+    /(?:request|connection|gateway) timed? out/i,
+    /temporarily unavailable|service unavailable|bad gateway|gateway timeout/i,
+  ].some((pattern) => pattern.test(message));
+}
+
+export function buildCodexRetryPrompt(originalPrompt: string): string {
+  return [
+    '刚才处理下面这项用户请求时连接中断。请继续并完整完成该请求，只处理一次；如果此前已经完成了外部写入，不要重复创建或重复提交。',
+    '<original_request>',
+    originalPrompt,
+    '</original_request>',
+  ].join('\n');
 }
 
 export function codexModelCandidates(
@@ -544,27 +566,49 @@ export class CodexCliAgent implements AgentAdapter {
       let finalText: string | undefined;
       const models = codexModelCandidates(this.config.model, this.config.fallbackModel);
       for (let index = 0; index < models.length; index += 1) {
-        try {
-          const result = yield* this.runCodexAttempt(
-            request,
-            prompt,
-            signal,
-            activeThreadId,
-            store,
-            models[index],
-            emittedImages,
-          );
-          finalText = result.finalText;
-          activeThreadId = result.activeThreadId;
-          break;
-        } catch (error) {
-          activeThreadId = store?.get(request.sessionKey) ?? activeThreadId;
-          if (index + 1 < models.length && isCodexCapacityError(error)) {
-            yield { kind: 'status', text: '刚才那一路额度不足，我换一路继续处理。' };
-            continue;
+        let transientRetry = 0;
+        let attemptPrompt = prompt;
+        while (true) {
+          try {
+            const result = yield* this.runCodexAttempt(
+              request,
+              attemptPrompt,
+              signal,
+              activeThreadId,
+              store,
+              models[index],
+              emittedImages,
+              (threadId) => {
+                if (!this.config.ephemeral) activeThreadId = threadId;
+              },
+            );
+            finalText = result.finalText;
+            activeThreadId = result.activeThreadId;
+            break;
+          } catch (error) {
+            activeThreadId = store?.get(request.sessionKey) ?? activeThreadId;
+            if (
+              !signal.aborted &&
+              isCodexTransientError(error) &&
+              transientRetry < this.config.transientRetries
+            ) {
+              transientRetry += 1;
+              yield {
+                kind: 'status',
+                text: `连接刚才中断了，正在自动重试（${transientRetry}/${this.config.transientRetries}）。`,
+              };
+              await delay(Math.min(2_000, transientRetry * 1_000), undefined, { signal });
+              attemptPrompt = buildCodexRetryPrompt(prompt);
+              continue;
+            }
+            if (index + 1 < models.length && isCodexCapacityError(error)) {
+              yield { kind: 'status', text: '刚才那一路额度不足，我换一路继续处理。' };
+              break;
+            }
+            throw error;
           }
-          throw error;
         }
+        if (finalText) break;
       }
 
       if (timeoutController.signal.aborted) throw new Error('Codex 任务执行超时');
@@ -602,6 +646,7 @@ export class CodexCliAgent implements AgentAdapter {
     store: CodexSessionStore | undefined,
     model: string | undefined,
     emittedImages: Set<string>,
+    onThreadStarted: (threadId: string) => void,
   ): AsyncGenerator<AgentEvent, { finalText: string; activeThreadId: string | undefined }> {
     const globalArgs = [
       '--sandbox',
@@ -664,6 +709,7 @@ export class CodexCliAgent implements AgentAdapter {
 
         if (event.type === 'thread.started' && typeof event.thread_id === 'string') {
           activeThreadId = event.thread_id;
+          onThreadStarted(event.thread_id);
           if (store) await store.set(request.sessionKey, event.thread_id);
         }
 

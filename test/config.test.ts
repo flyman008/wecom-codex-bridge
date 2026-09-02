@@ -25,4 +25,5 @@ test('读取 Codex 首选模型和额度降级模型', () => {
   assert.equal(config.codex.fallbackModel, 'gpt-5.4-mini');
   assert.equal(config.codex.reasoningEffort, 'low');
   assert.equal(config.codex.serviceTier, 'fast');
+  assert.equal(config.codex.transientRetries, 2);
 });

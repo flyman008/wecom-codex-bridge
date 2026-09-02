@@ -32,6 +32,7 @@ test('安装配置保留使用者的 Codex 与服务选择', () => {
   assert.equal(parsed.CODEX_MODEL, '');
   assert.equal(parsed.CODEX_FALLBACK_MODEL, '');
   assert.equal(parsed.CODEX_WORKDIR, 'C:\\work folder');
+  assert.equal(parsed.CODEX_TRANSIENT_RETRIES, '2');
   assert.equal(parsed.PERSONA_PROFILE_PATH, '.runtime/persona-profile.json');
 });
 

@@ -68,6 +68,7 @@ export function buildEnv(settings) {
     line('CODEX_ADDITIONAL_DIRS', settings.codexAdditionalDirs),
     line('CODEX_SANDBOX', settings.codexSandbox),
     'CODEX_TIMEOUT_MS=1800000',
+    'CODEX_TRANSIENT_RETRIES=2',
     line('CODEX_EPHEMERAL', settings.codexEphemeral),
     'CODEX_SESSION_PATH=.runtime/codex-sessions.json',
     '',

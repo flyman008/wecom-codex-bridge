@@ -5,6 +5,7 @@ import test from 'node:test';
 import {
   buildCodexConfigArgs,
   buildCodexGeneralPrompt,
+  buildCodexRetryPrompt,
   buildDocumentConversionPrompt,
   changedGeneratedImagePaths,
   codexModelCandidates,
@@ -12,6 +13,7 @@ import {
   extractWeComDocumentResult,
   extractWeComSpreadsheetResult,
   isCodexCapacityError,
+  isCodexTransientError,
   resolveCodexCommand,
   resolveWeComCliInvocation,
   resolveWeComCliScript,
@@ -57,6 +59,29 @@ test('只有额度、配额或限流错误触发 Codex 模型降级', () => {
   assert.equal(isCodexCapacityError(new Error('当前模型额度已用完')), true);
   assert.equal(isCodexCapacityError(new Error('network connection closed')), false);
   assert.equal(isCodexCapacityError(new Error('tool execution failed')), false);
+});
+
+test('Codex 上游临时断流会被识别为可重试错误', () => {
+  assert.equal(
+    isCodexTransientError(
+      new Error(
+        'stream disconnected before completion: websocket closed by server before response.completed',
+      ),
+    ),
+    true,
+  );
+  assert.equal(isCodexTransientError(new Error('read ECONNRESET')), true);
+  assert.equal(isCodexTransientError(new Error('network connection closed')), true);
+  assert.equal(isCodexTransientError(new Error('setup refresh had errors')), false);
+  assert.equal(isCodexTransientError(new Error('tool execution failed')), false);
+  assert.equal(isCodexTransientError(new Error('insufficient_quota')), false);
+});
+
+test('Codex 重试提示要求续跑且避免重复外部写入', () => {
+  const prompt = buildCodexRetryPrompt('创建一份企微文档');
+  assert.match(prompt, /连接中断/);
+  assert.match(prompt, /不要重复创建/);
+  assert.match(prompt, /创建一份企微文档/);
 });
 
 test('Codex 普通对话提示支持人设和附件', () => {

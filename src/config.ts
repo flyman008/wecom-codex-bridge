@@ -27,6 +27,7 @@ export interface AppConfig {
     additionalDirs: string[];
     sandbox: 'read-only' | 'workspace-write';
     timeoutMs: number;
+    transientRetries: number;
     ephemeral: boolean;
     sessionPath: string;
   };
@@ -123,6 +124,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       additionalDirs: parseDirectoryList(optional(env, 'CODEX_ADDITIONAL_DIRS')),
       sandbox: codexSandbox(env),
       timeoutMs: integer(env, 'CODEX_TIMEOUT_MS', 1_800_000, 10_000),
+      transientRetries: integer(env, 'CODEX_TRANSIENT_RETRIES', 2, 0),
       ephemeral: boolean(env, 'CODEX_EPHEMERAL', true),
       sessionPath: resolve(
         optional(env, 'CODEX_SESSION_PATH') ?? '.runtime/codex-sessions.json',
