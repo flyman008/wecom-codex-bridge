@@ -71,6 +71,7 @@ export function buildEnv(settings) {
     'CODEX_TRANSIENT_RETRIES=2',
     line('CODEX_EPHEMERAL', settings.codexEphemeral),
     'CODEX_SESSION_PATH=.runtime/codex-sessions.json',
+    'CODEX_SESSION_MAX_INPUT_TOKENS=160000',
     '',
     '# 文档附件暂存与限制',
     'DOCUMENT_STAGING_DIR=.runtime/incoming',

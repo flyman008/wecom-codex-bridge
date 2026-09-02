@@ -30,6 +30,7 @@ export interface AppConfig {
     transientRetries: number;
     ephemeral: boolean;
     sessionPath: string;
+    sessionMaxInputTokens: number;
   };
   documents: {
     stagingDir: string;
@@ -129,6 +130,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       sessionPath: resolve(
         optional(env, 'CODEX_SESSION_PATH') ?? '.runtime/codex-sessions.json',
       ),
+      sessionMaxInputTokens: integer(env, 'CODEX_SESSION_MAX_INPUT_TOKENS', 160_000, 10_000),
     },
     documents: {
       stagingDir: resolve(optional(env, 'DOCUMENT_STAGING_DIR') ?? '.runtime/incoming'),

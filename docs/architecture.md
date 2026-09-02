@@ -21,6 +21,7 @@
 - 群聊键：`group + chatid + userid`。
 - 持久化文件只保存 SHA-256 会话键和 Codex thread ID，不保存原始 userid/chatid。
 - 同一会话串行进入同一个 Codex thread，不会每条消息创建新对话。
+- 每轮记录累计输入 Token；达到配置阈值后，旧 thread 生成精简交接摘要，新 thread 携带摘要和当前请求继续处理。
 - 持久 thread 因上下文过大等原因发生临时断流时，桥接服务会停止反复恢复旧 thread，切换到新 thread 继续当前请求。
 
 ## 模型链

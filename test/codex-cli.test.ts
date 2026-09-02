@@ -5,6 +5,7 @@ import test from 'node:test';
 import {
   buildCodexConfigArgs,
   buildCodexGeneralPrompt,
+  buildCodexHandoffPrompt,
   buildCodexRetryPrompt,
   buildDocumentConversionPrompt,
   changedGeneratedImagePaths,
@@ -17,6 +18,7 @@ import {
   resolveCodexCommand,
   resolveWeComCliInvocation,
   resolveWeComCliScript,
+  shouldCompactCodexSession,
   shouldRotateCodexSessionAfterTransient,
 } from '../src/agents/codex-cli.js';
 
@@ -272,4 +274,16 @@ test('只从 Codex 结果提取普通企微文档链接', () => {
     () => extractWeComDocumentResult('https://doc.weixin.qq.com/smartpage/example', 'source.html'),
     /没有返回普通企微在线文档链接/,
   );
+});
+
+test('Codex 会话在输入 Token 达到阈值时主动滚动', () => {
+  assert.equal(shouldCompactCodexSession(undefined, 160_000), false);
+  assert.equal(shouldCompactCodexSession(159_999, 160_000), false);
+  assert.equal(shouldCompactCodexSession(160_000, 160_000), true);
+});
+
+test('Codex 新会话提示同时携带交接摘要和当前请求', () => {
+  const prompt = buildCodexHandoffPrompt('请继续处理报表', '用户正在处理月报，输出必须简洁。');
+  assert.match(prompt, /<handoff_summary>[\s\S]*用户正在处理月报/);
+  assert.match(prompt, /<current_request>[\s\S]*请继续处理报表/);
 });

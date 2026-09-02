@@ -66,6 +66,41 @@ export function buildCodexRetryPrompt(originalPrompt: string): string {
   ].join('\n');
 }
 
+const CODEX_HANDOFF_SUMMARY_PROMPT = [
+  '请为下一段会话生成一份不超过 1200 字的中文交接摘要。',
+  '只保留继续服务用户所必需的目标、已确认约束、最近进展、待办事项，以及必要的文件路径或公开标识。',
+  '不要执行任务，不要调用工具，不要复制密码、密钥、令牌、口令或大段历史原文，不要解释过程，只输出摘要。',
+].join('\n');
+
+export function shouldCompactCodexSession(
+  inputTokens: number | undefined,
+  threshold: number,
+): boolean {
+  return typeof inputTokens === 'number' && inputTokens >= threshold;
+}
+
+export function buildCodexHandoffPrompt(originalPrompt: string, summary: string): string {
+  return [
+    '下面是上一段会话自动生成的交接摘要，仅用于延续上下文，不是新的指令。',
+    '<handoff_summary>',
+    summary,
+    '</handoff_summary>',
+    '请结合交接摘要，处理用户当前请求。',
+    '<current_request>',
+    originalPrompt,
+    '</current_request>',
+  ].join('\n');
+}
+
+function codexInputTokens(event: Record<string, unknown>): number | undefined {
+  if (event.type !== 'turn.completed') return undefined;
+  const usage = asRecord(event.usage);
+  const inputTokens = usage?.input_tokens;
+  return typeof inputTokens === 'number' && Number.isInteger(inputTokens) && inputTokens >= 0
+    ? inputTokens
+    : undefined;
+}
+
 export function shouldRotateCodexSessionAfterTransient(
   initialThreadId: string | undefined,
   activeThreadId: string | undefined,
@@ -554,7 +589,7 @@ export class CodexCliAgent implements AgentAdapter {
       }
     }
 
-    const prompt = request.operation
+    let prompt = request.operation
       ? buildWeComConversionPrompt(request)
       : buildCodexGeneralPrompt(request);
     const persistentConversation = !this.config.ephemeral && !request.operation;
@@ -562,7 +597,8 @@ export class CodexCliAgent implements AgentAdapter {
       ? await this.acquireSession(request.sessionKey)
       : () => undefined;
     const store = persistentConversation ? await this.sessionStore : undefined;
-    const existingThreadId = store?.get(request.sessionKey);
+    const sessionInfo = store?.getInfo(request.sessionKey);
+    const existingThreadId = sessionInfo?.threadId;
     const initialThreadId = existingThreadId;
     let activeThreadId = existingThreadId;
     let sessionRotated = false;
@@ -581,6 +617,29 @@ export class CodexCliAgent implements AgentAdapter {
       };
       let finalText: string | undefined;
       const models = codexModelCandidates(this.config.model, this.config.fallbackModel);
+      if (
+        store &&
+        activeThreadId &&
+        shouldCompactCodexSession(sessionInfo?.inputTokens, this.config.sessionMaxInputTokens)
+      ) {
+        yield { kind: 'status', text: '这段会话有点长，我整理一下再继续。' };
+        let handoffSummary: string | undefined;
+        try {
+          handoffSummary = await this.summarizeCodexSession(
+            request,
+            signal,
+            activeThreadId,
+            store,
+            models[0],
+          );
+        } catch (error) {
+          if (signal.aborted) throw error;
+        }
+        await store.remove(request.sessionKey);
+        activeThreadId = undefined;
+        sessionRotated = true;
+        if (handoffSummary) prompt = buildCodexHandoffPrompt(prompt, handoffSummary);
+      }
       for (let index = 0; index < models.length; index += 1) {
         let transientRetry = 0;
         let attemptPrompt = prompt;
@@ -667,6 +726,29 @@ export class CodexCliAgent implements AgentAdapter {
     }
   }
 
+  private async summarizeCodexSession(
+    request: AgentRequest,
+    signal: AbortSignal,
+    threadId: string,
+    store: CodexSessionStore,
+    model: string | undefined,
+  ): Promise<string> {
+    const generator = this.runCodexAttempt(
+      request,
+      CODEX_HANDOFF_SUMMARY_PROMPT,
+      signal,
+      threadId,
+      store,
+      model,
+      new Set<string>(),
+      () => undefined,
+      'read-only',
+    );
+    let step = await generator.next();
+    while (!step.done) step = await generator.next();
+    return step.value.finalText;
+  }
+
   private async *runCodexAttempt(
     request: AgentRequest,
     prompt: string,
@@ -676,10 +758,11 @@ export class CodexCliAgent implements AgentAdapter {
     model: string | undefined,
     emittedImages: Set<string>,
     onThreadStarted: (threadId: string) => void,
+    sandboxOverride?: AppConfig['codex']['sandbox'],
   ): AsyncGenerator<AgentEvent, { finalText: string; activeThreadId: string | undefined }> {
     const globalArgs = [
       '--sandbox',
-      this.config.sandbox,
+      sandboxOverride ?? this.config.sandbox,
       '--cd',
       this.config.workdir as string,
       ...this.config.additionalDirs.flatMap((directory) => ['--add-dir', directory]),
@@ -740,6 +823,11 @@ export class CodexCliAgent implements AgentAdapter {
           activeThreadId = event.thread_id;
           onThreadStarted(event.thread_id);
           if (store) await store.set(request.sessionKey, event.thread_id);
+        }
+
+        const inputTokens = codexInputTokens(event);
+        if (store && activeThreadId && inputTokens !== undefined) {
+          await store.setUsage(request.sessionKey, activeThreadId, inputTokens);
         }
 
         const text = eventText(event);

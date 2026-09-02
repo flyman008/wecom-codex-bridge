@@ -18,3 +18,22 @@ test('Codex 会话映射持久化且不保存原始企微会话键', async () =>
   assert.equal(reopened.get(rawSessionKey), threadId);
   assert.doesNotMatch(await readFile(path, 'utf8'), /raw-chat-id|raw-user-id/);
 });
+
+test('Codex 会话映射记录输入 Token 且同一会话更新时保留用量', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'codex-session-usage-test-'));
+  const path = join(root, 'sessions.json');
+  const rawSessionKey = 'single:chat:user';
+  const threadId = '01a047b0-19a4-7093-a833-b3ebf05baa3f';
+  const store = await CodexSessionStore.open(path);
+
+  await store.set(rawSessionKey, threadId);
+  await store.setUsage(rawSessionKey, threadId, 160_001);
+  await store.set(rawSessionKey, threadId);
+
+  const reopened = await CodexSessionStore.open(path);
+  assert.deepEqual(reopened.getInfo(rawSessionKey), {
+    threadId,
+    updatedAt: reopened.getInfo(rawSessionKey)?.updatedAt,
+    inputTokens: 160_001,
+  });
+});

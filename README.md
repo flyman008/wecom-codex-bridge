@@ -73,6 +73,7 @@ npm run setup
 - Codex 首选模型、额度降级模型、推理强度和 Fast 策略；这些项目均可留空并继承使用者自己的 Codex 配置；
 - Codex 工作目录、附加授权目录、只读或可写沙箱；
 - 同一企微会话是否保持一个持续的 Codex 上下文；
+- 持久会话达到 160000 输入 Token 时自动生成交接摘要并换新会话，阈值可通过 `CODEX_SESSION_MAX_INPUT_TOKENS` 调整；
 - Codex 网络或上游流临时中断时，默认使用同一模型自动续跑两次，可通过 `CODEX_TRANSIENT_RETRIES` 调整；
 - 是否在当前用户登录后自动启动服务，并可立即应用选择；
 
