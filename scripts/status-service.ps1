@@ -1,30 +1,34 @@
 $ErrorActionPreference = 'Stop'
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$pidFile = Join-Path $projectRoot '.runtime\service.pid'
-$serviceProcessId = $null
-if (Test-Path -LiteralPath $pidFile) {
-  $serviceProcessId = [int](Get-Content -LiteralPath $pidFile -Raw)
+$runtimeDir = Join-Path $projectRoot '.runtime'
+
+function Read-ProcessState([string]$name) {
+  $path = Join-Path $runtimeDir "$name.pid"
+  if (-not (Test-Path -LiteralPath $path)) { return @($false, $null) }
+  $processId = [int](Get-Content -LiteralPath $path -Raw)
+  return @([bool](Get-Process -Id $processId -ErrorAction SilentlyContinue), $processId)
 }
 
-$processRunning = $false
-if ($serviceProcessId) {
-  $processRunning = [bool](Get-Process -Id $serviceProcessId -ErrorAction SilentlyContinue)
-}
-
+$keeper = Read-ProcessState 'keeper'
+$supervisor = Read-ProcessState 'supervisor'
+$service = Read-ProcessState 'service'
 try {
   $health = Invoke-RestMethod -Uri 'http://127.0.0.1:8787/health' -TimeoutSec 3
-  [pscustomobject]@{
-    ProcessRunning = $processRunning
-    ProcessId = $serviceProcessId
-    Connection = $health.status
-    ActiveTasks = $health.activeTasks
-  }
+  $connection = $health.status
+  $activeTasks = $health.activeTasks
 } catch {
-  [pscustomobject]@{
-    ProcessRunning = $processRunning
-    ProcessId = $serviceProcessId
-    Connection = 'unavailable'
-    ActiveTasks = $null
-  }
+  $connection = 'unavailable'
+  $activeTasks = $null
+}
+
+[pscustomobject]@{
+  KeeperRunning = $keeper[0]
+  KeeperId = $keeper[1]
+  SupervisorRunning = $supervisor[0]
+  SupervisorId = $supervisor[1]
+  ProcessRunning = $service[0]
+  ProcessId = $service[1]
+  Connection = $connection
+  ActiveTasks = $activeTasks
 }

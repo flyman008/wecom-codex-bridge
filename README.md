@@ -97,6 +97,8 @@ Windows 常驻运行：
 .\scripts\stop-service.ps1
 ```
 
+Windows 启动后使用两级保活：监督进程负责重启业务服务，保活进程负责重新拉起意外退出的监督进程。
+
 macOS 常驻运行：
 
 ```bash

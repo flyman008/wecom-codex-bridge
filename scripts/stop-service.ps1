@@ -1,26 +1,35 @@
 $ErrorActionPreference = 'Stop'
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$pidFile = Join-Path $projectRoot '.runtime\service.pid'
-$expectedEntry = [IO.Path]::GetFullPath((Join-Path $projectRoot 'dist\src\index.js'))
+$runtimeDir = Join-Path $projectRoot '.runtime'
+$stopFile = Join-Path $runtimeDir 'service.stop'
+$targets = @(
+  @{ Name = 'keeper'; Marker = (Join-Path $projectRoot 'scripts\service-keeper.ps1') },
+  @{ Name = 'supervisor'; Marker = (Join-Path $projectRoot 'scripts\service-supervisor.mjs') },
+  @{ Name = 'service'; Marker = (Join-Path $projectRoot 'dist\src\index.js') }
+)
 
-if (-not (Test-Path -LiteralPath $pidFile)) {
-  Write-Output 'Service is not running (PID file not found).'
-  exit 0
+New-Item -ItemType Directory -Path $runtimeDir -Force | Out-Null
+Set-Content -LiteralPath $stopFile -Value 'stop' -Encoding ascii
+$stopped = @()
+foreach ($target in $targets) {
+  $pidFile = Join-Path $runtimeDir "$($target.Name).pid"
+  if (-not (Test-Path -LiteralPath $pidFile)) { continue }
+  $processId = [int](Get-Content -LiteralPath $pidFile -Raw)
+  $processInfo = Get-CimInstance Win32_Process -Filter "ProcessId = $processId"
+  if ($processInfo) {
+    if (-not $processInfo.CommandLine -or $processInfo.CommandLine.IndexOf($target.Marker, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
+      throw "PID $processId does not belong to $($target.Name); refusing to stop it."
+    }
+    if ($target.Name -eq 'service') {
+      & taskkill.exe /PID $processId /T /F | Out-Null
+    } else {
+      Stop-Process -Id $processId -Force
+    }
+    $stopped += "$($target.Name) PID $processId"
+  }
+  Remove-Item -LiteralPath $pidFile -Force -ErrorAction SilentlyContinue
 }
-
-$serviceProcessId = [int](Get-Content -LiteralPath $pidFile -Raw)
-$processInfo = Get-CimInstance Win32_Process -Filter "ProcessId = $serviceProcessId"
-if (-not $processInfo) {
-  Remove-Item -LiteralPath $pidFile -Force
-  Write-Output 'Service is not running (stale PID file removed).'
-  exit 0
-}
-
-if (-not $processInfo.CommandLine -or $processInfo.CommandLine.IndexOf($expectedEntry, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
-  throw "PID $serviceProcessId does not belong to this service; refusing to stop it."
-}
-
-Stop-Process -Id $serviceProcessId -ErrorAction Stop
-Remove-Item -LiteralPath $pidFile -Force
-Write-Output "Service stopped (PID $serviceProcessId)."
+Start-Sleep -Milliseconds 300
+Remove-Item -LiteralPath $stopFile -Force -ErrorAction SilentlyContinue
+Write-Output $(if ($stopped.Count) { "Stopped $($stopped -join '; ')." } else { 'Service is not running.' })
