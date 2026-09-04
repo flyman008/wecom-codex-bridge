@@ -9,71 +9,100 @@ $supervisorPidFile = Join-Path $runtimeDir 'supervisor.pid'
 $stopFile = Join-Path $runtimeDir 'service.stop'
 $entryPath = Join-Path $projectRoot 'dist\src\index.js'
 $supervisorPath = Join-Path $projectRoot 'scripts\service-supervisor.mjs'
-$keeperPath = Join-Path $projectRoot 'scripts\service-keeper.ps1'
+$keeperPath = Join-Path $projectRoot 'scripts\service-keeper.mjs'
+$nodePath = (Get-Command node -ErrorAction Stop).Source
 
 New-Item -ItemType Directory -Path $runtimeDir -Force | Out-Null
 New-Item -ItemType Directory -Path $logDir -Force | Out-Null
 
-foreach ($requiredPath in @($entryPath, $supervisorPath, $keeperPath)) {
-  if (-not (Test-Path -LiteralPath $requiredPath)) { throw "Required file not found: $requiredPath" }
+if (-not (Test-Path -LiteralPath $entryPath)) {
+  throw "Build output not found: $entryPath"
+}
+if (-not (Test-Path -LiteralPath $supervisorPath)) {
+  throw "Supervisor script not found: $supervisorPath"
+}
+if (-not (Test-Path -LiteralPath $keeperPath)) {
+  throw "Keeper script not found: $keeperPath"
 }
 
 $supervisorRunning = $false
 if (Test-Path -LiteralPath $supervisorPidFile) {
-  $supervisorId = [int](Get-Content -LiteralPath $supervisorPidFile -Raw)
-  $supervisor = Get-CimInstance Win32_Process -Filter "ProcessId = $supervisorId"
-  if ($supervisor -and $supervisor.CommandLine -and $supervisor.CommandLine.IndexOf($supervisorPath, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
+  $existingSupervisorId = [int](Get-Content -LiteralPath $supervisorPidFile -Raw)
+  $existingSupervisor = Get-CimInstance Win32_Process -Filter "ProcessId = $existingSupervisorId"
+  if (
+    $existingSupervisor -and
+    $existingSupervisor.CommandLine -and
+    $existingSupervisor.CommandLine.IndexOf($supervisorPath, [StringComparison]::OrdinalIgnoreCase) -ge 0
+  ) {
     $supervisorRunning = $true
   } else {
     Remove-Item -LiteralPath $supervisorPidFile -Force
   }
 }
 
+$keeperProcess = $null
 $keeperProcessId = $null
 if (Test-Path -LiteralPath $keeperPidFile) {
-  $candidateId = [int](Get-Content -LiteralPath $keeperPidFile -Raw)
-  $candidate = Get-CimInstance Win32_Process -Filter "ProcessId = $candidateId"
-  if ($candidate -and $candidate.CommandLine -and $candidate.CommandLine.IndexOf($keeperPath, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
-    $keeperProcessId = $candidateId
+  $existingKeeperId = [int](Get-Content -LiteralPath $keeperPidFile -Raw)
+  $existingKeeper = Get-CimInstance Win32_Process -Filter "ProcessId = $existingKeeperId"
+  if (
+    $existingKeeper -and
+    $existingKeeper.CommandLine -and
+    $existingKeeper.CommandLine.IndexOf($keeperPath, [StringComparison]::OrdinalIgnoreCase) -ge 0
+  ) {
+    $keeperProcess = $existingKeeper
+    $keeperProcessId = $existingKeeperId
   } else {
     Remove-Item -LiteralPath $keeperPidFile -Force
   }
 }
 
+# Clean up a legacy directly-started service before switching to the supervisor.
 if (-not $supervisorRunning -and (Test-Path -LiteralPath $pidFile)) {
-  $legacyId = [int](Get-Content -LiteralPath $pidFile -Raw)
-  $legacy = Get-CimInstance Win32_Process -Filter "ProcessId = $legacyId"
-  if ($legacy -and $legacy.CommandLine -and $legacy.CommandLine.IndexOf($entryPath, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
-    Stop-Process -Id $legacyId -Force
+  $legacyProcessId = [int](Get-Content -LiteralPath $pidFile -Raw)
+  $legacyProcess = Get-CimInstance Win32_Process -Filter "ProcessId = $legacyProcessId"
+  if (
+    $legacyProcess -and
+    $legacyProcess.CommandLine -and
+    $legacyProcess.CommandLine.IndexOf($entryPath, [StringComparison]::OrdinalIgnoreCase) -ge 0
+  ) {
+    Stop-Process -Id $legacyProcessId -Force
   }
   Remove-Item -LiteralPath $pidFile -Force
 }
 
 Remove-Item -LiteralPath $stopFile -Force -ErrorAction SilentlyContinue
-if (-not $keeperProcessId) {
-  $powershellCommand = Get-Command powershell.exe -ErrorAction SilentlyContinue
-  if (-not $powershellCommand) { $powershellCommand = Get-Command pwsh.exe -ErrorAction Stop }
-  $keeper = Start-Process -FilePath $powershellCommand.Source `
-    -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$keeperPath`"") `
+
+if (-not $keeperProcess) {
+  $keeperStdoutPath = Join-Path $logDir 'keeper.stdout.log'
+  $keeperStderrPath = Join-Path $logDir 'keeper.stderr.log'
+  $keeperProcess = Start-Process -FilePath $nodePath `
+    -ArgumentList @("`"$keeperPath`"") `
     -WorkingDirectory $projectRoot `
     -WindowStyle Hidden `
-    -RedirectStandardOutput (Join-Path $logDir 'keeper.stdout.log') `
-    -RedirectStandardError (Join-Path $logDir 'keeper.stderr.log') `
+    -RedirectStandardOutput $keeperStdoutPath `
+    -RedirectStandardError $keeperStderrPath `
     -PassThru
-  $keeperProcessId = $keeper.Id
-  Set-Content -LiteralPath $keeperPidFile -Value $keeperProcessId -Encoding ascii
+  Set-Content -LiteralPath $keeperPidFile -Value $keeperProcess.Id -Encoding ascii
+  $keeperProcessId = $keeperProcess.Id
 }
 
 $serviceProcessId = $null
 for ($attempt = 0; $attempt -lt 50; $attempt += 1) {
-  if (-not (Get-Process -Id $keeperProcessId -ErrorAction SilentlyContinue)) { throw 'Service keeper exited during startup.' }
+  if (-not (Get-Process -Id $keeperProcessId -ErrorAction SilentlyContinue)) {
+    $errorText = Get-Content -LiteralPath $keeperStderrPath -Raw -ErrorAction SilentlyContinue
+    throw "Service keeper exited during startup. $errorText"
+  }
   if (Test-Path -LiteralPath $pidFile) {
     $serviceProcessId = [int](Get-Content -LiteralPath $pidFile -Raw)
     if (Get-Process -Id $serviceProcessId -ErrorAction SilentlyContinue) { break }
   }
   Start-Sleep -Milliseconds 200
 }
-if (-not $serviceProcessId) { throw 'Service did not become ready.' }
+
+if (-not $serviceProcessId) {
+  throw 'Service supervisor started, but the service process did not become ready.'
+}
 
 $supervisorProcessId = [int](Get-Content -LiteralPath $supervisorPidFile -Raw)
 Write-Output "Service keeper running (PID $keeperProcessId); supervisor running (PID $supervisorProcessId); service running (PID $serviceProcessId)."
